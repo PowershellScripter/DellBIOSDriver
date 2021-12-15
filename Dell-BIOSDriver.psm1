@@ -166,6 +166,18 @@ begin{
 
 process{
     
+
+
+Switch($PSCmdlet.MyInvocation.Line)
+{
+    {$_ -match 'Get-DellBIOSDriver.+?Syntax \| Install-DellBIOSDriver|Get-DellBIOSDriver \| Install-DellBIOSDriver.+?Syntax'}
+        {
+            return Write-Error 'Invalid Arguments!'
+        }
+}
+
+
+    
 Switch($Syntax){
     'True'{
         DellBIOSSyntax
@@ -176,8 +188,8 @@ Switch($Syntax){
 
 
 
-    $Host.PrivateData.ProgressBackgroundColor='Black' 
-    $Host.PrivateData.ProgressForegroundColor='Cyan'
+$Host.PrivateData.ProgressBackgroundColor='Black' 
+$Host.PrivateData.ProgressForegroundColor='Cyan'
 
 
 
@@ -259,9 +271,8 @@ Function local:Result
 
 Function local:Download{
     
-    Start-BitsTransfer -Source $Product.URL -Destination $Script:File -DisplayName "$($Product.System)" -Description "Downloading `'$($Product.FileName)`' to `'$((Get-Culture).TextInfo.ToTitleCase($FolderPath.ToLower()))`'"
+    Start-BitsTransfer -Source $Product.URL -Destination $Script:File -DisplayName "   $($Product.System)" -Description " Downloading `'$($Product.FileName)`' to `'$((Get-Culture).TextInfo.ToTitleCase($FolderPath.ToLower()))`'"
         
-    Write-Host "`nFile Saved: `'$Script:File`'`n"
 }
 
 
@@ -348,6 +359,8 @@ $Script:File = "$($FolderPath)\$($Product.FileName)" | %{
 
 
 
+
+
 Switch($Download){
 
 'True'{
@@ -363,7 +376,11 @@ Result
 
 
 
-If((!$Download) -and ($PSCmdlet.MyInvocation.Line -match 'Install-DellBIOSDriver')){
+
+
+
+
+If((!$Download) -and ($PSCmdlet.MyInvocation.Line -match 'Get-DellBIOSDriver \| Install-DellBIOSDriver')){
 
     Download
 
@@ -386,15 +403,6 @@ If(($PSCmdlet.MyInvocation.Line -match 'Install-DellBIOSDriver')){
 
 
 } #End Function
-
-
-
-
-
-
-
-
-
 
 
 
@@ -516,7 +524,7 @@ param(
         [Switch]$SupressUI,
                 
         [Parameter(Mandatory=$False, ParameterSetName='Install', Position=4)]
-        [Switch]$OverrideSoftDependencyError,
+        [Switch]$OverrideSoftError,
 
         [Parameter(Mandatory=$False, ParameterSetName='Install', Position=5)]
         [Switch]$AutoReboot,
@@ -555,6 +563,9 @@ process
 {
 
 
+
+
+
 Switch($Syntax){
     'True'{
         DellBIOSSyntax
@@ -567,7 +578,7 @@ Switch($Syntax){
 
 
 
-Switch($OverrideSoftDependencyError)
+Switch($OverrideSoftError)
 {
 
     'True'
@@ -587,11 +598,11 @@ Switch($OverrideSoftDependencyError)
 
             } #End SupressUI Switch
             
-        } #End OverrideSoftDependencyError False
+        } #End OverrideSoftError False
 
 
 
-} #End OverrideSoftDependencyError Switch
+} #End OverrideSoftError Switch
 
 
 
@@ -611,66 +622,101 @@ else{
     
 
 
-[String]$LogFile = "/l=""$($LogFile + "\DellBios__$("{0:M-dd-yy-HH_mm_ss}" -f (Get-Date)).log")"""
+[String]$Script:LogFile = "/l=""$($LogFile + "\DellBios__$("{0:M-dd-yy-HH_mm_ss}" -f (Get-Date)).log")"""
+
+& "$File" $comSwitch $Script:LogFile $cred
 
 
-& "$File" $comSwitch $LogFile $cred
 
-
-While(Get-Process | ?{$_.Path -match "$($Product.FileName)"})
+While(Get-Process | ?{$_.Path -match "$(Split-Path $File -Leaf)"})
 {
     start-sleep -seconds 1
 }
 
 
 
+
 Try
 {
-    if($Null -eq (Get-Content "$($LogFile -replace '/l=|"')" -ea si))
-    {
-        
-        $Script:errorInfo = 'True'
-        Write-Output "`n`nError: Image did not take.`nThis may be due to an unsupported BIOS image`n`nPlease verify correct image was downloaded`n`n`n""$($FolderPath)\$($Product.FileName)""`n`n"
-        Result
-        return
-        
-    }
 
-    if((Get-Content "$($LogFile -replace '/l=|"')" -ea si | Select-String -All 'Unsupported BIOS image').Matches.Value)
+    switch([System.IO.File]::Exists("$($Script:LogFile -replace '/l=|"')"))
     {
-        return "`n`nError: Unsupported BIOS image`n`nPlease verify correct image was downloaded`n`n`n""$File""`n`n`n"
-    }
-
-    if((Get-Content "$($LogFile -replace '/l=|"')" -ea si | Select-String -All 'Password Validation failure').Matches.Value)
-    {
-        return "`n`nError: Password Validation Failure`n`nIt seems there is a password locking the BIOS`n`nPlease use the 'BiosPass' parameter to supply a bios password to continue`n`nAborting`n`n`n"
-    }
-
-    if((Get-Content "$($LogFile -replace '/l=|"')" -ea si | Select-String -All 'Soft.+?Dep.+?Error').Matches.Value)
-    {
-
-        if((Get-Content "$($LogFile -replace '/l=|"')" -ea si | Select-String -All 'new.+?same.+?current').Matches.Value)
+        'True'
         {
-            Write-Output "`n`nError: New BIOS is the same as the current BIOS.`n`nTo override please use '-OverrideSoftDependencyError' parameter`n`nAborting`n`n`n"
-        }else{
-            Write-Output "`n`nError: Soft Dependency Error.`n`n$(Get-Content -raw "$($LogFile -replace '/l=|"')" -ea si)`n`nTo override please use '-OverrideSoftDependencyError' parameter`n`nAborting`n`n`n"
             
-        }
-            "$File","$($LogFile -replace '/l=|"')" | Remove-Item -fo
-            break
+            switch(Get-Content -raw "$($Script:LogFile -replace '/l=|"')" )
+            {
+
+                                
+                {![String]::IsNullOrEmpty(($_ | Select-String -All 'Unsupported BIOS image').Matches.Value)}
+                    {
+                        return "`n`nError: Unsupported BIOS image`n`nPlease verify correct image was downloaded`n`n`n""$File""`n`n`n"
+                    }
+
+
+                {![String]::IsNullOrEmpty(($_ | Select-String -All 'Password Validation failure').Matches.Value)}
+                    {
+                        return "`n`nError: Password Validation Failure`n`nIt seems there is a password locking the BIOS`n`nPlease use the 'BiosPass' parameter to supply a bios password to continue`n`n`n"
+                    }
+
+
+                {![String]::IsNullOrEmpty(($_ | Select-String -All 'Soft.+?Dep.+?Error').Matches.Value)}
+                    {
+
+                        switch($_)
+                        {
+                            {$_ -match ($_ | Select-String -All 'new.+?same.+?current').Matches.Value}
+                                {
+                                    Write-Output "`n`nError: New BIOS is the same as the current BIOS.`n`nTo override please use '-OverrideSoftError' parameter`n`n`n"
+                                }
+                            {$_ -notmatch ($_ | Select-String -All 'new.+?same.+?current').Matches.Value}
+                                {
+                                    Write-Output "`n`nError: Soft Dependency Error.`n`n$($_)`n`nTo override please use '-OverrideSoftError' parameter`n`n`n"   
+                                }
+                            }
+                            Write-Output "QUICK COMMAND:`n`nInstall-DellBIOSDriver -File '$($File)' -SupressUI -OverrideSoftError -AutoReboot`n`n`n"
+                            return
+                    }
+
+
+
+
+                {![String]::IsNullOrEmpty(($_ | Select-String -All 'Hard.+?Qualification').Matches.Value)}
+                    {
+                    
+                        switch($_)
+                        {
+                            {$_ -match ($_ | Select-String -All 'Unsupported.+?System').Matches.Value}
+                                {
+                                    Write-Output "`n`nError: Unsupported System ID Found.`n`nPlease verify you have the correct file for this system.`n`nFile: `'$File`'`n`n`n"
+                                }
+                            {$_ -notmatch ($_ | Select-String -All 'Unsupported.+?System').Matches.Value}
+                                {
+                                    Write-Output "`n`n$_`n`n`n"
+                                }
+                        }
+                        return
+                    }
+
+
+
+                {![String]::IsNullOrEmpty(($_ | Select-String -All 'new.+?older.+?current').Matches.Value)}
+                    {
+                        Write-Output "`n`n$(($_ |  Select-String -All 'Error.+?new.+?older.+?current.+').Matches.Value)`n`n`n`n`nQUICK COMMAND TO UPDATE TO LATEST BIOS:`n`nGet-DellBIOSDriver | Install-DellBIOSDriver -SupressUI -AutoReboot`n`n`n" 
+                        return
+                    }
+
+
+
+            }
+
+
+        } #End True
+
+
     }
 
-    if((Get-Content "$($LogFile -replace '/l=|"')" -ea si | Select-String -All 'Hard.+?Qualification').Matches.Value)
-    {
-        if((Get-Content "$($LogFile -replace '/l=|"')" -ea si | Select-String -All 'Unsupported.+?System').Matches.Value)
-        {
-            return "`n`nError: Unsupported System ID Found.`n`nPlease verify you have the correct file for this system.`n`nFile: `'$File`'`n`nAborting`n`n`n"
-        }
-        else{
-            return "`n`nError: Hard Qualification Error.`n`n$(Get-Content -raw "$($LogFile -replace '/l=|"')" -ea si)`n`nAborting`n`n`n"
-        }
-        
-    }
+   
 
 }
 Catch{
@@ -702,20 +748,23 @@ Switch($PurgeLeftOvers)
     {$_ -match 'All'}
 
         {
-            "$File","$($LogFile -replace '/l=|"')" | Remove-Item -fo -ea -si
+            "$File","$($Script:LogFile -replace '/l=|"')" | Remove-Item -fo -ea -si
         }
+
 
     {$_ -match 'LogFile'}
 
         {
-            "$($LogFile -replace '/l=|"')" | Remove-Item -fo -ea si
+            "$($Script:LogFile -replace '/l=|"')" | Remove-Item -fo -ea si
         }
+
 
     {$_ -match 'Exe'}
 
         {
             "$File" | Remove-Item -fo -ea si
         }
+        
 
 }
 
@@ -810,8 +859,13 @@ Function DellBIOSSyntax{
   "
   
           }
+
+
+
       {$_ -match 'Install-DellBIOSDriver -Syntax'}
           {
+
+
   Write-Output "
   
   Install-DellBIOSDriver
@@ -820,7 +874,7 @@ Function DellBIOSSyntax{
                          -BiosPass  <Object>
                          -LogFile  <string>
                          -SupressUI
-                         -OverrideSoftDependencyError
+                         -OverrideSoftError
                          -AutoReboot
                          -PurgeLeftOvers  {LogFile | Exe | All}
     
@@ -837,7 +891,7 @@ Function DellBIOSSyntax{
       
   [-File] will only show if initialized on the entrypoint of the pipeline
   
-  [-OverrideSoftDependencyError] is used in the event that the same BIOS version 
+  [-OverrideSoftError] is used in the event that the same BIOS version 
   is being installed or other sofwtare dependency related errors  
   
   
@@ -851,11 +905,14 @@ Function DellBIOSSyntax{
   
   
   "
+
+
           }
   
       }
   
-      switch($PSCmdlet.MyInvocation.Line){
+      switch($PSCmdlet.MyInvocation.Line)
+      {
   
           {$_ -match '-IncludeExamples'}
               {
@@ -889,27 +946,3 @@ Function DellBIOSSyntax{
           }
   return
   }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Export-ModuleMember -Function 'Get-DellBIOSDriver','Install-DellBIOSDriver'
