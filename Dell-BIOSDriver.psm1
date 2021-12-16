@@ -65,14 +65,14 @@ Function Get-DellBIOSDriver {
                     }
             
             $productResults = @()
-            $allProducts = (irm 'https://www.dell.com/support/components/productselector/allproducts?' -Headers $Headers | Select-String -AllMatches -Pattern '((?<=data-vmpath=").+?(?="))').Matches.Value | ?{$_ -match 'laptop|desktop|server|workstations'}
+            $allProducts = (Invoke-RestMethod 'https://www.dell.com/support/components/productselector/allproducts?' -Headers $Headers | Select-String -AllMatches -Pattern '((?<=data-vmpath=").+?(?="))').Matches.Value | ?{$_ -match 'laptop|desktop|server|workstations'}
             $configPlatform = $allProducts | ?{$_ -match $fakeBoundParameters.Platform}
             $configModel = $fakeBoundParameters.Make
             $wordToComplete = $fakeBoundParameters.Model
 
-            (irm "https://www.dell.com/support/components/productselector/allproducts?category=$($configPlatform)/$(($configPlatform | Select-String -AllMatches -Pattern '(?<=.\/).+$').Matches.Value)_$($configModel)" -Method GET -Headers $Headers | Select-String -AllMatches -Pattern '((?<=data-vmpath=").+?(?="))').Matches.Value | %{
+            (Invoke-RestMethod "https://www.dell.com/support/components/productselector/allproducts?category=$($configPlatform)/$(($configPlatform | Select-String -AllMatches -Pattern '(?<=.\/).+$').Matches.Value)_$($configModel)" -Method GET -Headers $Headers | Select-String -AllMatches -Pattern '((?<=data-vmpath=").+?(?="))').Matches.Value | %{
     
-                    (irm "https://www.dell.com/support/components/productselector/allproducts?category=$($_)" -Method GET -Headers $Headers | Select-String -AllMatches -Pattern '((?<=data-prodcode=").+?(?="))').Matches.Value | %{
+                    (Invoke-RestMethod "https://www.dell.com/support/components/productselector/allproducts?category=$($_)" -Method GET -Headers $Headers | Select-String -AllMatches -Pattern '((?<=data-prodcode=").+?(?="))').Matches.Value | %{
                         $productResults += $_
                     }        
             }
@@ -132,7 +132,7 @@ Function Get-DellBIOSDriver {
                 }
 
         })]    
-        $FolderPath = $([System.Environment]::GetEnvironmentVariable('TEMP','Machine')),
+        $FolderPath = $([System.Environment]::GetEnvironmentVariable('TEMP','User')),
 
 
         [Parameter(Mandatory, ParameterSetName='Syntax', Position=0)]
@@ -167,6 +167,9 @@ begin{
 process{
     
 
+    CheckNewVersion
+
+
 
 Switch($PSCmdlet.MyInvocation.Line)
 {
@@ -174,6 +177,16 @@ Switch($PSCmdlet.MyInvocation.Line)
         {
             return Write-Error 'Invalid Arguments!'
         }
+    {$_ -match 'Install-DellBIOSDriver'}
+    {
+        switch([bool](([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)))
+        {
+            'False'
+                {    
+                        return Write-Error "`n`nUsing Install-DellBIOSDriver requires administartive priveldges. Please re-run in an Administrative session`n`n`n"
+                }
+        }
+    }
 }
 
 
@@ -194,7 +207,7 @@ $Host.PrivateData.ProgressForegroundColor='Cyan'
 
 
 
-# Check for first launch value
+# Added check of reg key for first launch config on internet explorer. If internet explorer is not configured, Invoke-WebRequest and Invoke-RestMethod will not work properly.
 
 
 if(!$Null -eq (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Internet Explorer\Main" -Name "DisableFirstRunCustomize" -ea si)){
@@ -234,8 +247,8 @@ Function local:ProductCode
     $productCode = ($requestedURL | Select-String -AllMatches -Pattern '(?<=Dell\.Metrics\.sc\.supportsystem = \").+(?=\")').Matches.Value
     $System = ($requestedURL | Select-String -AllMatches -Pattern '(?<=Support for ).+?(?= \|)').Matches.Value | Select -First 1
     $encryptedServiceTag =  ($requestedURL | Select-String -AllMatches -Pattern '(?<=serviceEncryptedkey = '').+(?='';)').Matches.Value
-    
-    $Script:Product = (irm "https://www.dell.com/support/driver/en-us/ips/api/driverlist/getdriversbytag?productcode=$productCode&servicetag=$encryptedServiceTag" -Method GET -Headers $Headers).DriverListData  | ?{$_.CatName -match 'bios'} | Sort-Object DriverName -Descending | 
+
+    $Script:Product = (Invoke-RestMethod "https://www.dell.com/support/driver/en-us/ips/api/driverlist/fetchdriversbytag?productcode=$productCode&servicetag=$encryptedServiceTag" -Method GET -Headers $Headers).DriverListData  | ?{$_.CatName -match 'bios'} | Sort-Object DriverName -Descending | 
     Select -First 1 |
     Select @{n='System';e={"$System"}},@{n='ServiceTag';e={"$sTag"}}, DriverId, DriverName, @{n="DriverVersion";e={$_.DellVer}}, ReleaseDate, @{n='FileName';e={"$(($_.FileFrmtInfo.HttpFileLocation | Select-String -AllMatches -Pattern '\/((?:.(?!\/))+$)').Matches.Groups[1].value)"}}, @{n="URL";e={$_.FileFrmtInfo.HttpFileLocation}}
      
@@ -327,7 +340,7 @@ Switch([string]::IsNullOrEmpty($ServiceTag) -and [string]::IsNullOrEmpty($Platfo
         
             'False' {              
 
-                $Script:Product = (irm "https://www.dell.com/support/driver/en-us/ips/api/driverlist/getdriversbyproduct?productcode=$($Model -replace ' ','-')" -Method GET -Headers $Headers).DriverListData | ?{$_.CatName -match 'bios'} | Sort-Object DriverName -Descending | 
+                $Script:Product = (Invoke-RestMethod "https://www.dell.com/support/driver/en-us/ips/api/driverlist/fetchdriversbyproduct?productcode=$($Model -replace ' ','-')" -Method GET -Headers $Headers).DriverListData | ?{$_.CatName -match 'bios'} | Sort-Object DriverName -Descending | 
                 Select -First 1 |
                 Select @{n='System';e={$Model}}, DriverId, DriverName, @{n="DriverVersion";e={$_.DellVer}}, ReleaseDate, @{n='FileName';e={"$(($_.FileFrmtInfo.HttpFileLocation | Select-String -AllMatches -Pattern '\/((?:.(?!\/))+$)').Matches.Groups[1].value)"}}, @{n="URL";e={$_.FileFrmtInfo.HttpFileLocation}}
 
@@ -517,14 +530,14 @@ param(
                     }
             
         })]
-        [String]$LogFile = "$([System.Environment]::GetEnvironmentVariable('TEMP','Machine'))",
+        [String]$LogFile = "$([System.Environment]::GetEnvironmentVariable('TEMP','User'))",
         
         
         [Parameter(Mandatory=$False, ParameterSetName='Install', Position=3)]
         [Switch]$SupressUI,
                 
         [Parameter(Mandatory=$False, ParameterSetName='Install', Position=4)]
-        [Switch]$OverrideSoftError,
+        [Switch]$Force,
 
         [Parameter(Mandatory=$False, ParameterSetName='Install', Position=5)]
         [Switch]$AutoReboot,
@@ -563,8 +576,28 @@ process
 {
 
 
+    CheckNewVersion
 
 
+Switch($PSCmdlet.MyInvocation.Line)
+{
+    {$_ -match 'Get-DellBIOSDriver.+?Syntax \| Install-DellBIOSDriver|Get-DellBIOSDriver \| Install-DellBIOSDriver.+?Syntax'}
+        {
+            return Write-Error 'Invalid Arguments!'
+        }
+    {$_ -match 'Install-DellBIOSDriver'}
+    {
+        switch([bool](([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)))
+        {
+            'False'
+                {    
+                        return Write-Error "`n`nUsing Install-DellBIOSDriver requires administartive priveldges. Please re-run in an Administrative session`n`n`n"
+                }
+        }
+    }
+}
+
+    
 
 Switch($Syntax){
     'True'{
@@ -578,7 +611,7 @@ Switch($Syntax){
 
 
 
-Switch($OverrideSoftError)
+Switch($Force)
 {
 
     'True'
@@ -598,11 +631,11 @@ Switch($OverrideSoftError)
 
             } #End SupressUI Switch
             
-        } #End OverrideSoftError False
+        } #End Force False
 
 
 
-} #End OverrideSoftError Switch
+} #End Force Switch
 
 
 
@@ -643,73 +676,88 @@ Try
     {
         'True'
         {
-            
-            switch(Get-Content -raw "$($Script:LogFile -replace '/l=|"')" )
+
+            switch((Get-Item "$($Script:LogFile -replace '/l=|"')").Length)
             {
+                {$_ -gt 0}
+                    {
 
+            
+                        switch(Get-Content -raw "$($Script:LogFile -replace '/l=|"')" )
+                        {
+
+                                            
+                            {![String]::IsNullOrEmpty(($_ | Select-String -All 'Unsupported BIOS image').Matches.Value)}
+                                {
+                                    return "`n`nError: Unsupported BIOS image`n`nPlease verify correct image was downloaded`n`n`n""$File""`n`n`n"
+                                }
+
+
+                            {![String]::IsNullOrEmpty(($_ | Select-String -All 'Password Validation failure').Matches.Value)}
+                                {
+                                    return "`n`nError: Password Validation Failure`n`nIt seems there is a password locking the BIOS`n`nPlease use the 'BiosPass' parameter to supply a bios password to continue`n`n`n"
+                                }
+
+
+                            {![String]::IsNullOrEmpty(($_ | Select-String -All 'Soft.+?Dep.+?Error').Matches.Value)}
+                                {
+
+                                    switch($_)
+                                    {
+                                        {$_ -match ($_ | Select-String -All 'new.+?same.+?current').Matches.Value}
+                                            {
+                                                Write-Output "`n`nError: New BIOS is the same as the current BIOS.`n`nTo override please use '-Force' parameter`n`n`n"
+                                            }
+                                        {$_ -notmatch ($_ | Select-String -All 'new.+?same.+?current').Matches.Value}
+                                            {
+                                                Write-Output "`n`nError: Soft Dependency Error.`n`n$($_)`n`nTo override please use '-Force' parameter`n`n`n"   
+                                            }
+                                        }
+                                        Write-Output "QUICK COMMAND:`n`nInstall-DellBIOSDriver -File '$($File)' -SupressUI -Force -AutoReboot`n`n`n"
+                                        return
+                                }
+
+
+
+
+                            {![String]::IsNullOrEmpty(($_ | Select-String -All 'Hard.+?Qualification').Matches.Value)}
+                                {
                                 
-                {![String]::IsNullOrEmpty(($_ | Select-String -All 'Unsupported BIOS image').Matches.Value)}
-                    {
-                        return "`n`nError: Unsupported BIOS image`n`nPlease verify correct image was downloaded`n`n`n""$File""`n`n`n"
-                    }
-
-
-                {![String]::IsNullOrEmpty(($_ | Select-String -All 'Password Validation failure').Matches.Value)}
-                    {
-                        return "`n`nError: Password Validation Failure`n`nIt seems there is a password locking the BIOS`n`nPlease use the 'BiosPass' parameter to supply a bios password to continue`n`n`n"
-                    }
-
-
-                {![String]::IsNullOrEmpty(($_ | Select-String -All 'Soft.+?Dep.+?Error').Matches.Value)}
-                    {
-
-                        switch($_)
-                        {
-                            {$_ -match ($_ | Select-String -All 'new.+?same.+?current').Matches.Value}
-                                {
-                                    Write-Output "`n`nError: New BIOS is the same as the current BIOS.`n`nTo override please use '-OverrideSoftError' parameter`n`n`n"
+                                    switch($_)
+                                    {
+                                        {$_ -match ($_ | Select-String -All 'Unsupported.+?System').Matches.Value}
+                                            {
+                                                Write-Output "`n`nError: Unsupported System ID Found.`n`nPlease verify you have the correct file for this system.`n`nFile: `'$File`'`n`n`n"
+                                            }
+                                        {$_ -notmatch ($_ | Select-String -All 'Unsupported.+?System').Matches.Value}
+                                            {
+                                                Write-Output "`n`n$_`n`n`n"
+                                            }
+                                    }
+                                    return
                                 }
-                            {$_ -notmatch ($_ | Select-String -All 'new.+?same.+?current').Matches.Value}
+
+
+
+                            {![String]::IsNullOrEmpty(($_ | Select-String -All 'new.+?older.+?current').Matches.Value)}
                                 {
-                                    Write-Output "`n`nError: Soft Dependency Error.`n`n$($_)`n`nTo override please use '-OverrideSoftError' parameter`n`n`n"   
+                                    Write-Output "`n`n$(($_ |  Select-String -All 'Error.+?new.+?older.+?current.+').Matches.Value)`n`n`n`n`nQUICK COMMAND TO UPDATE TO LATEST BIOS:`n`nGet-DellBIOSDriver | Install-DellBIOSDriver -SupressUI -AutoReboot`n`n`n" 
+                                    return
                                 }
-                            }
-                            Write-Output "QUICK COMMAND:`n`nInstall-DellBIOSDriver -File '$($File)' -SupressUI -OverrideSoftError -AutoReboot`n`n`n"
-                            return
-                    }
 
 
-
-
-                {![String]::IsNullOrEmpty(($_ | Select-String -All 'Hard.+?Qualification').Matches.Value)}
-                    {
-                    
-                        switch($_)
-                        {
-                            {$_ -match ($_ | Select-String -All 'Unsupported.+?System').Matches.Value}
-                                {
-                                    Write-Output "`n`nError: Unsupported System ID Found.`n`nPlease verify you have the correct file for this system.`n`nFile: `'$File`'`n`n`n"
-                                }
-                            {$_ -notmatch ($_ | Select-String -All 'Unsupported.+?System').Matches.Value}
-                                {
-                                    Write-Output "`n`n$_`n`n`n"
-                                }
                         }
-                        return
                     }
 
-
-
-                {![String]::IsNullOrEmpty(($_ | Select-String -All 'new.+?older.+?current').Matches.Value)}
+                    {$_ -le 0}
                     {
-                        Write-Output "`n`n$(($_ |  Select-String -All 'Error.+?new.+?older.+?current.+').Matches.Value)`n`n`n`n`nQUICK COMMAND TO UPDATE TO LATEST BIOS:`n`nGet-DellBIOSDriver | Install-DellBIOSDriver -SupressUI -AutoReboot`n`n`n" 
-                        return
+                        If($((Get-WinEvent @{logname='application';level=2;starttime=[datetime]::Now.AddSeconds(-5)} -ea si | ?{$_.Properties.Value -match "$($File -replace '\\','\\')"}).Properties.Value))
+                        {
+                            return "`n`n`nError: Wrong file for system or corrupt file.`n`n`nFile: `'$($File)`'`n`n`n"
+                        }
+                        
                     }
-
-
-
             }
-
 
         } #End True
 
@@ -874,7 +922,7 @@ Function DellBIOSSyntax{
                          -BiosPass  <Object>
                          -LogFile  <string>
                          -SupressUI
-                         -OverrideSoftError
+                         -Force
                          -AutoReboot
                          -PurgeLeftOvers  {LogFile | Exe | All}
     
@@ -891,7 +939,7 @@ Function DellBIOSSyntax{
       
   [-File] will only show if initialized on the entrypoint of the pipeline
   
-  [-OverrideSoftError] is used in the event that the same BIOS version 
+  [-Force] is used in the event that the same BIOS version 
   is being installed or other sofwtare dependency related errors  
   
   
@@ -945,4 +993,29 @@ Function DellBIOSSyntax{
   
           }
   return
+  }
+
+
+
+  Function CheckNewVersion {
+
+    Try{
+
+
+        $Output = "`n`nNewer Version of Module Available!`n`n"
+
+        If(((Find-Module 'Dell-BIOSDriver' -Repository PSGallery).Version -gt (Get-InstalledModule Dell-BIOSDriver -ea si).Version) -and ($PSCmdlet.MyInvocation.Line -match 'Get-DellBIOSDriver'))
+        {
+            Write-Output $Output
+        }
+
+        If(((Find-Module 'Dell-BIOSDriver' -Repository PSGallery).Version -gt (Get-InstalledModule Dell-BIOSDriver -ea si).Version) -and ($PSCmdlet.MyInvocation.Line -match 'Install-DellBIOSDriver') -and ($PSCmdlet.MyInvocation.Line -notmatch 'Get-DellBIOSDriver'))
+        {
+            Write-Output $Output
+        }
+
+    }catch{
+        $ErrorActionPreference = 'SilentlyContinue'
+    }
+
   }
