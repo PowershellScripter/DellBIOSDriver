@@ -65,14 +65,14 @@ Function Get-DellBIOSDriver {
                     }
             
             $productResults = @()
-            $allProducts = (Invoke-RestMethod 'https://www.dell.com/support/components/productselector/allproducts?' -Headers $Headers | Select-String -AllMatches -Pattern '((?<=data-vmpath=").+?(?="))').Matches.Value | ?{$_ -match 'laptop|desktop|server|workstations'}
+            $allProducts = (Invoke-RestMethod 'https://www.dell.com/support/components/productselector/allproducts?' -Headers $Headers -UseBasic | Select-String -AllMatches -Pattern '((?<=data-vmpath=").+?(?="))').Matches.Value | ?{$_ -match 'laptop|desktop|server|workstations'}
             $configPlatform = $allProducts | ?{$_ -match $fakeBoundParameters.Platform}
             $configModel = $fakeBoundParameters.Make
             $wordToComplete = $fakeBoundParameters.Model
 
-            (Invoke-RestMethod "https://www.dell.com/support/components/productselector/allproducts?category=$($configPlatform)/$(($configPlatform | Select-String -AllMatches -Pattern '(?<=.\/).+$').Matches.Value)_$($configModel)" -Method GET -Headers $Headers | Select-String -AllMatches -Pattern '((?<=data-vmpath=").+?(?="))').Matches.Value | %{
+            (Invoke-RestMethod "https://www.dell.com/support/components/productselector/allproducts?category=$($configPlatform)/$(($configPlatform | Select-String -AllMatches -Pattern '(?<=.\/).+$').Matches.Value)_$($configModel)" -Method GET -Headers $Headers -UseBasic | Select-String -AllMatches -Pattern '((?<=data-vmpath=").+?(?="))').Matches.Value | %{
     
-                    (Invoke-RestMethod "https://www.dell.com/support/components/productselector/allproducts?category=$($_)" -Method GET -Headers $Headers | Select-String -AllMatches -Pattern '((?<=data-prodcode=").+?(?="))').Matches.Value | %{
+                    (Invoke-RestMethod "https://www.dell.com/support/components/productselector/allproducts?category=$($_)" -Method GET -Headers $Headers -UseBasic | Select-String -AllMatches -Pattern '((?<=data-prodcode=").+?(?="))').Matches.Value | %{
                         $productResults += $_
                     }        
             }
@@ -143,6 +143,7 @@ Function Get-DellBIOSDriver {
         [Switch]
         $IncludeExamples,
 
+
         [Parameter(DontShow)]
         $DebugPreference
 
@@ -167,8 +168,6 @@ begin{
 process{
     
 
-    CheckNewVersion
-
 
 
 Switch($PSCmdlet.MyInvocation.Line)
@@ -183,11 +182,12 @@ Switch($PSCmdlet.MyInvocation.Line)
         {
             'False'
                 {    
-                        return Write-Error "`n`nUsing Install-DellBIOSDriver requires administartive priveldges. Please re-run in an Administrative session`n`n`n"
+                    return Write-Error "`n`nUsing Install-DellBIOSDriver requires administartive priveldges. Please re-run in an Administrative session`n`n`n"
                 }
         }
     }
 }
+
 
 
     
@@ -204,21 +204,6 @@ Switch($Syntax){
 $Host.PrivateData.ProgressBackgroundColor='Black' 
 $Host.PrivateData.ProgressForegroundColor='Cyan'
 
-
-
-
-# Added check of reg key for first launch config on internet explorer. If internet explorer is not configured, Invoke-WebRequest and Invoke-RestMethod will not work properly.
-
-
-if(!$Null -eq (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Internet Explorer\Main" -Name "DisableFirstRunCustomize" -ea si)){
-
-    if((Get-ItemPropertyValue -Path "HKLM:\SOFTWARE\Microsoft\Internet Explorer\Main" -Name "DisableFirstRunCustomize") -ne 2) {
-        [void](Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Internet Explorer\Main" -Name "DisableFirstRunCustomize" -Value 2)
-    }
-}
-elseif($Null -eq (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Internet Explorer\Main" -Name "DisableFirstRunCustomize" -ea si)) {
-    [void](New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Internet Explorer\Main" -Name "DisableFirstRunCustomize" -Value 2)
-}
 
 
 
@@ -242,13 +227,13 @@ $Script:Result = [PSCustomObject]@{
 Function local:ProductCode
 {
 
-    $requestedURL = iwr -Uri "https://www.dell.com/support/home/en-us/product-support/servicetag/$sTag" -Method Options -Headers $Headers
+    $requestedURL = iwr -Uri "https://www.dell.com/support/home/en-us/product-support/servicetag/$sTag" -Method Options -Headers $Headers -UseBasic
 
     $productCode = ($requestedURL | Select-String -AllMatches -Pattern '(?<=Dell\.Metrics\.sc\.supportsystem = \").+(?=\")').Matches.Value
     $System = ($requestedURL | Select-String -AllMatches -Pattern '(?<=Support for ).+?(?= \|)').Matches.Value | Select -First 1
     $encryptedServiceTag =  ($requestedURL | Select-String -AllMatches -Pattern '(?<=serviceEncryptedkey = '').+(?='';)').Matches.Value
 
-    $Script:Product = (Invoke-RestMethod "https://www.dell.com/support/driver/en-us/ips/api/driverlist/fetchdriversbytag?productcode=$productCode&servicetag=$encryptedServiceTag" -Method GET -Headers $Headers).DriverListData  | ?{$_.CatName -match 'bios'} | Sort-Object DriverName -Descending | 
+    $Script:Product = (Invoke-RestMethod "https://www.dell.com/support/driver/en-us/ips/api/driverlist/fetchdriversbytag?productcode=$productCode&servicetag=$encryptedServiceTag" -Method GET -Headers $Headers -UseBasic).DriverListData  | ?{$_.CatName -match 'bios'} | Sort-Object DriverName -Descending | 
     Select -First 1 |
     Select @{n='System';e={"$System"}},@{n='ServiceTag';e={"$sTag"}}, DriverId, DriverName, @{n="DriverVersion";e={$_.DellVer}}, ReleaseDate, @{n='FileName';e={"$(($_.FileFrmtInfo.HttpFileLocation | Select-String -AllMatches -Pattern '\/((?:.(?!\/))+$)').Matches.Groups[1].value)"}}, @{n="URL";e={$_.FileFrmtInfo.HttpFileLocation}}
      
@@ -340,7 +325,7 @@ Switch([string]::IsNullOrEmpty($ServiceTag) -and [string]::IsNullOrEmpty($Platfo
         
             'False' {              
 
-                $Script:Product = (Invoke-RestMethod "https://www.dell.com/support/driver/en-us/ips/api/driverlist/fetchdriversbyproduct?productcode=$($Model -replace ' ','-')" -Method GET -Headers $Headers).DriverListData | ?{$_.CatName -match 'bios'} | Sort-Object DriverName -Descending | 
+                $Script:Product = (Invoke-RestMethod "https://www.dell.com/support/driver/en-us/ips/api/driverlist/fetchdriversbyproduct?productcode=$($Model -replace ' ','-')" -Method GET -Headers $Headers -UseBasic).DriverListData | ?{$_.CatName -match 'bios'} | Sort-Object DriverName -Descending | 
                 Select -First 1 |
                 Select @{n='System';e={$Model}}, DriverId, DriverName, @{n="DriverVersion";e={$_.DellVer}}, ReleaseDate, @{n='FileName';e={"$(($_.FileFrmtInfo.HttpFileLocation | Select-String -AllMatches -Pattern '\/((?:.(?!\/))+$)').Matches.Groups[1].value)"}}, @{n="URL";e={$_.FileFrmtInfo.HttpFileLocation}}
 
@@ -576,7 +561,7 @@ process
 {
 
 
-    CheckNewVersion
+    
 
 
 Switch($PSCmdlet.MyInvocation.Line)
@@ -997,25 +982,3 @@ Function DellBIOSSyntax{
 
 
 
-  Function CheckNewVersion {
-
-    Try{
-
-
-        $Output = "`n`nNewer Version of Module Available!`n`n"
-
-        If(((Find-Module 'Dell-BIOSDriver' -Repository PSGallery).Version -gt (Get-InstalledModule Dell-BIOSDriver -ea si).Version) -and ($PSCmdlet.MyInvocation.Line -match 'Get-DellBIOSDriver'))
-        {
-            Write-Output $Output
-        }
-
-        If(((Find-Module 'Dell-BIOSDriver' -Repository PSGallery).Version -gt (Get-InstalledModule Dell-BIOSDriver -ea si).Version) -and ($PSCmdlet.MyInvocation.Line -match 'Install-DellBIOSDriver') -and ($PSCmdlet.MyInvocation.Line -notmatch 'Get-DellBIOSDriver'))
-        {
-            Write-Output $Output
-        }
-
-    }catch{
-        $ErrorActionPreference = 'SilentlyContinue'
-    }
-
-  }
