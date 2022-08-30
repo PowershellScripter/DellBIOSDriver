@@ -182,7 +182,7 @@ Switch($PSCmdlet.MyInvocation.Line)
         {
             'False'
                 {    
-                    return Write-Error "`n`nUsing Install-DellBIOSDriver requires administartive priveldges. Please re-run in an Administrative session`n`n`n"
+                    return Write-Error "`n`nUsing Install-DellBIOSDriver requires administrative privileges. Please re-run in an Administrative session`n`n`n"
                 }
         }
     }
